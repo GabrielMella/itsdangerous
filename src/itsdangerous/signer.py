@@ -9,6 +9,7 @@ from .encoding import _base64_alphabet
 from .encoding import base64_decode
 from .encoding import base64_encode
 from .encoding import want_bytes
+from .exc import BadData
 from .exc import BadSignature
 
 
@@ -228,7 +229,7 @@ class Signer:
         """Verifies the signature for the given value."""
         try:
             sig = base64_decode(sig)
-        except Exception:
+        except BadData:
             return False
 
         value = want_bytes(value)

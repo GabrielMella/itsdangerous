@@ -50,6 +50,18 @@ class TestSigner:
 
         assert exc_info.value.payload == b"b"
 
+    def test_verify_signature_unexpected_error_propagates(self, signer, monkeypatch):
+        # Only BadData (raised by base64_decode for malformed base64) should
+        # be swallowed by verify_signature. Any other, unexpected error must
+        # propagate instead of being silently turned into a "False" result.
+        def raise_unexpected(*args, **kwargs):
+            raise RuntimeError("unexpected failure")
+
+        monkeypatch.setattr("itsdangerous.signer.base64_decode", raise_unexpected)
+
+        with pytest.raises(RuntimeError):
+            signer.verify_signature(b"my string", b"anything")
+
     def test_changed_value(self, signer):
         signed = signer.sign("my string")
         signed = signed.replace(b"my", b"other", 1)
