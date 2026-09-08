@@ -69,6 +69,79 @@ class TimestampSigner(Signer):
         return_timestamp: t.Literal[True] = True,
     ) -> tuple[bytes, datetime]: ...
 
+    def _split_timestamp(
+        self,
+        result: bytes,
+        sig_error: BadSignature | None,
+    ) -> tuple[bytes, bytes]:
+        """Split ``result`` into the payload and the raw timestamp bytes.
+
+        If there is no timestamp in the result there is something
+        seriously wrong. In case there was a signature error, we raise
+        that one directly, otherwise we have a weird situation in
+        which we shouldn't have come except someone uses a time-based
+        serializer on non-timestamp data, so catch that.
+        """
+        sep = want_bytes(self.sep)
+
+        if sep not in result:
+            if sig_error:
+                raise sig_error
+
+            raise BadTimeSignature("timestamp missing", payload=result)
+
+        value, ts_bytes = result.rsplit(sep, 1)
+        return value, ts_bytes
+
+    def _parse_timestamp(self, ts_bytes: bytes) -> int | None:
+        """Decode the raw timestamp bytes into an integer, or ``None``
+        if they are malformed.
+        """
+        try:
+            return bytes_to_int(base64_decode(ts_bytes))
+        except Exception:
+            return None
+
+    def _raise_for_sig_error(
+        self, sig_error: BadSignature, value: bytes, ts_int: int | None
+    ) -> t.NoReturn:
+        """Signature is *not* okay. Raise a proper error now that we
+        have split the value and the timestamp.
+        """
+        ts_dt: datetime | None = None
+
+        if ts_int is not None:
+            try:
+                ts_dt = self.timestamp_to_datetime(ts_int)
+            except (ValueError, OSError, OverflowError) as exc:
+                # Windows raises OSError
+                # 32-bit raises OverflowError
+                raise BadTimeSignature(
+                    "Malformed timestamp", payload=value
+                ) from exc
+
+        raise BadTimeSignature(str(sig_error), payload=value, date_signed=ts_dt)
+
+    def _check_max_age(self, value: bytes, ts_int: int, max_age: int) -> None:
+        """Check the timestamp is not older than ``max_age`` seconds and
+        not from the future.
+        """
+        age = self.get_timestamp() - ts_int
+
+        if age > max_age:
+            raise SignatureExpired(
+                f"Signature age {age} > {max_age} seconds",
+                payload=value,
+                date_signed=self.timestamp_to_datetime(ts_int),
+            )
+
+        if age < 0:
+            raise SignatureExpired(
+                f"Signature age {age} < 0 seconds",
+                payload=value,
+                date_signed=self.timestamp_to_datetime(ts_int),
+            )
+
     def unsign(
         self,
         signed_value: str | bytes,
@@ -92,65 +165,19 @@ class TimestampSigner(Signer):
             sig_error = e
             result = e.payload or b""
 
-        sep = want_bytes(self.sep)
+        value, ts_bytes = self._split_timestamp(result, sig_error)
+        ts_int = self._parse_timestamp(ts_bytes)
 
-        # If there is no timestamp in the result there is something
-        # seriously wrong. In case there was a signature error, we raise
-        # that one directly, otherwise we have a weird situation in
-        # which we shouldn't have come except someone uses a time-based
-        # serializer on non-timestamp data, so catch that.
-        if sep not in result:
-            if sig_error:
-                raise sig_error
-
-            raise BadTimeSignature("timestamp missing", payload=result)
-
-        value, ts_bytes = result.rsplit(sep, 1)
-        ts_int: int | None = None
-        ts_dt: datetime | None = None
-
-        try:
-            ts_int = bytes_to_int(base64_decode(ts_bytes))
-        except Exception:
-            pass
-
-        # Signature is *not* okay. Raise a proper error now that we have
-        # split the value and the timestamp.
         if sig_error is not None:
-            if ts_int is not None:
-                try:
-                    ts_dt = self.timestamp_to_datetime(ts_int)
-                except (ValueError, OSError, OverflowError) as exc:
-                    # Windows raises OSError
-                    # 32-bit raises OverflowError
-                    raise BadTimeSignature(
-                        "Malformed timestamp", payload=value
-                    ) from exc
-
-            raise BadTimeSignature(str(sig_error), payload=value, date_signed=ts_dt)
+            self._raise_for_sig_error(sig_error, value, ts_int)
 
         # Signature was okay but the timestamp is actually not there or
         # malformed. Should not happen, but we handle it anyway.
         if ts_int is None:
             raise BadTimeSignature("Malformed timestamp", payload=value)
 
-        # Check timestamp is not older than max_age
         if max_age is not None:
-            age = self.get_timestamp() - ts_int
-
-            if age > max_age:
-                raise SignatureExpired(
-                    f"Signature age {age} > {max_age} seconds",
-                    payload=value,
-                    date_signed=self.timestamp_to_datetime(ts_int),
-                )
-
-            if age < 0:
-                raise SignatureExpired(
-                    f"Signature age {age} < 0 seconds",
-                    payload=value,
-                    date_signed=self.timestamp_to_datetime(ts_int),
-                )
+            self._check_max_age(value, ts_int, max_age)
 
         if return_timestamp:
             return value, self.timestamp_to_datetime(ts_int)

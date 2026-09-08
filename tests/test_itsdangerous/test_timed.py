@@ -6,6 +6,9 @@ from functools import partial
 import pytest
 from freezegun import freeze_time
 
+from itsdangerous.encoding import base64_encode
+from itsdangerous.encoding import int_to_bytes
+from itsdangerous.exc import BadSignature
 from itsdangerous.exc import BadTimeSignature
 from itsdangerous.exc import SignatureExpired
 from itsdangerous.signer import Signer
@@ -91,6 +94,65 @@ class TestTimestampSigner(FreezeMixin, TestSigner):
             signer.unsign(signed)
 
         assert isinstance(exc_info.value.date_signed, datetime)
+
+    def test_split_timestamp_reraises_sig_error(self, signer):
+        sig_error = BadSignature("bad signature", payload=b"novalidsep")
+
+        with pytest.raises(BadSignature) as exc_info:
+            signer._split_timestamp(b"novalidsep", sig_error)
+
+        assert exc_info.value is sig_error
+
+    def test_split_timestamp_missing_without_sig_error(self, signer):
+        with pytest.raises(BadTimeSignature) as exc_info:
+            signer._split_timestamp(b"novalidsep", None)
+
+        assert "missing" in str(exc_info.value)
+
+    def test_split_timestamp_success(self, signer):
+        value, ts_bytes = signer._split_timestamp(b"value.abc123", None)
+        assert value == b"value"
+        assert ts_bytes == b"abc123"
+
+    def test_parse_timestamp_valid(self, signer):
+        ts_bytes = base64_encode(int_to_bytes(1234))
+        assert signer._parse_timestamp(ts_bytes) == 1234
+
+    def test_parse_timestamp_malformed(self, signer):
+        assert signer._parse_timestamp(b"____________") is None
+
+    def test_check_max_age_expired(self, signer, ts):
+        with pytest.raises(SignatureExpired) as exc_info:
+            signer._check_max_age(b"value", int(ts.timestamp()) - 20, 10)
+
+        assert "seconds" in str(exc_info.value)
+        assert exc_info.value.date_signed == ts - timedelta(seconds=20)
+
+    def test_check_max_age_in_future(self, signer, ts):
+        with pytest.raises(SignatureExpired) as exc_info:
+            signer._check_max_age(b"value", int(ts.timestamp()) + 20, 10)
+
+        assert "seconds" in str(exc_info.value)
+
+    def test_check_max_age_within_bounds(self, signer, ts):
+        # Should not raise when the timestamp is within max_age.
+        signer._check_max_age(b"value", int(ts.timestamp()), 10)
+
+    def test_raise_for_sig_error_with_valid_timestamp(self, signer, ts):
+        sig_error = BadSignature("bad signature")
+
+        with pytest.raises(BadTimeSignature) as exc_info:
+            signer._raise_for_sig_error(sig_error, b"value", int(ts.timestamp()))
+
+        assert exc_info.value.date_signed == ts
+
+    def test_raise_for_sig_error_without_timestamp(self, signer):
+        sig_error = BadSignature("bad signature")
+
+        with pytest.raises(BadTimeSignature) as exc_info:
+            signer._raise_for_sig_error(sig_error, b"value", None)
+
+        assert exc_info.value.date_signed is None
 
 
 class TestTimedSerializer(FreezeMixin, TestSerializer):
