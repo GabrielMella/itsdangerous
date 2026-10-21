@@ -49,9 +49,9 @@ class HMACAlgorithm(SigningAlgorithm):
     """Provides signature generation using HMACs."""
 
     #: The digest method to use with the MAC algorithm. This defaults to
-    #: SHA1, but can be changed to any other function in the hashlib
+    #: SHA-256, but can be changed to any other function in the hashlib
     #: module.
-    default_digest_method: t.Any = staticmethod(_lazy_sha1)
+    default_digest_method: t.Any = hashlib.sha256
 
     def __init__(self, digest_method: t.Any = None):
         if digest_method is None:
@@ -93,7 +93,7 @@ class Signer:
         defaults to ``django-concat``.
     :param digest_method: Hash function to use when generating the HMAC
         signature. Defaults to :attr:`default_digest_method`, which
-        defaults to :func:`hashlib.sha1`. Note that the security of the
+        defaults to :func:`hashlib.sha256`. Note that the security of the
         hash alone doesn't apply when used intermediately in HMAC.
     :param algorithm: A :class:`SigningAlgorithm` instance to use
         instead of building a default :class:`HMACAlgorithm` with the
@@ -112,12 +112,12 @@ class Signer:
     """
 
     #: The default digest method to use for the signer. The default is
-    #: :func:`hashlib.sha1`, but can be changed to any :mod:`hashlib` or
+    #: :func:`hashlib.sha256`, but can be changed to any :mod:`hashlib` or
     #: compatible object. Note that the security of the hash alone
     #: doesn't apply when used intermediately in HMAC.
     #:
     #: .. versionadded:: 0.14
-    default_digest_method: t.Any = staticmethod(_lazy_sha1)
+    default_digest_method: t.Any = hashlib.sha256
 
     #: The default scheme to use to derive the signing key from the
     #: secret key and salt. The default is ``django-concat``. Possible
