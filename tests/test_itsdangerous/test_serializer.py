@@ -13,7 +13,6 @@ import pytest
 from itsdangerous.exc import BadPayload
 from itsdangerous.exc import BadSignature
 from itsdangerous.serializer import Serializer
-from itsdangerous.signer import _lazy_sha1
 from itsdangerous.signer import Signer
 
 
@@ -177,7 +176,7 @@ class TestSerializer:
         )
 
         unsigners = serializer.iter_unsigners()
-        assert next(unsigners).digest_method == _lazy_sha1
+        assert next(unsigners).digest_method == hashlib.sha256
 
         for signer in unsigners:
             assert signer.digest_method == hashlib.sha256
@@ -187,8 +186,10 @@ def test_digests():
     factory = partial(Serializer, secret_key="dev key", salt="dev salt")
     default_value = factory(signer_kwargs={}).dumps([42])
     sha1_value = factory(signer_kwargs={"digest_method": hashlib.sha1}).dumps([42])
+    sha256_value = factory(signer_kwargs={"digest_method": hashlib.sha256}).dumps([42])
     sha512_value = factory(signer_kwargs={"digest_method": hashlib.sha512}).dumps([42])
-    assert default_value == sha1_value
+    assert default_value == sha256_value
+    assert default_value != sha1_value
     assert sha1_value == "[42].-9cNi0CxsSB3hZPNCe9a2eEs1ZM"
     assert sha512_value == (
         "[42].MKCz_0nXQqv7wKpfHZcRtJRmpT2T5uvs9YQsJEhJimqxc"
